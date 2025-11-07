@@ -1,0 +1,8 @@
+{
+  "username": "your_username_here",
+  "password": "your_password_here",
+  "remember": true,
+  "auto_reconnect": true,
+  "retry": "3",
+  "theme": "dark"
+}
