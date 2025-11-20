@@ -98,7 +98,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='校园网登录工具_v2.6',
+    name='校园网登录工具_v2.7',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

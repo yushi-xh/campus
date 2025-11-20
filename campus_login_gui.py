@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-校园网自动登录 GUI 工具（v2.6）
+校园网自动登录 GUI 工具（v2.7）
 
 Copyright (c) 2025 yushi-xh
 License: MIT
@@ -460,7 +460,7 @@ class CampusLoginGUI:
         
         version_label = tk.Label(
             header_frame,
-            text="v2.0",
+            text="v2.7",
             font=('Consolas', 9),
             bg=colors['bg'],
             fg=colors['text_light']
@@ -1029,28 +1029,50 @@ class CampusLoginGUI:
         
         def monitor_loop():
             import time
+            fail_count = 0  # 连续失败计数器
+            FAIL_THRESHOLD = 3  # 达到此阈值才认为真正断网
+
             while self.monitoring:
                 try:
-                    if not internet_ok(self.session):
-                        self.log("检测到网络断开，尝试重新登录...")
-                        
-                        portal_url = find_captive_portal(self.session, DEFAULT_PROBE_URLS)
-                        if portal_url:
-                            success = perform_login(
-                                self.session,
-                                portal_url,
-                                username,
-                                password
-                            )
-                            if success:
-                                self.log("自动登录成功", "INFO")
-                            else:
-                                self.log("自动登录失败", "WARNING")
-                                
-                    time.sleep(5)  # 每5秒检测一次
+                    if internet_ok(self.session):
+                        if fail_count > 0:
+                            self.log(f"网络恢复，之前连续失败 {fail_count} 次", "INFO")
+                            fail_count = 0
+                        else:
+                            logging.debug("网络正常，继续监控...")
+                    else:
+                        # 探测失败，增加计数
+                        fail_count += 1
+                        logging.debug("[Network] Detection failed %d/%d times",
+                                     fail_count, FAIL_THRESHOLD)
+
+                        if fail_count >= FAIL_THRESHOLD:
+                            # 达到阈值，真正认为网络断开
+                            self.log(f"检测到网络断开（连续{fail_count}次失败），尝试重新登录...",
+                                    "WARNING")
+
+                            portal_url = find_captive_portal(self.session, DEFAULT_PROBE_URLS)
+                            if portal_url:
+                                success = perform_login(
+                                    self.session,
+                                    portal_url,
+                                    username,
+                                    password
+                                )
+                                if success:
+                                    self.log("自动登录成功", "INFO")
+                                    fail_count = 0  # 登录成功，重置计数
+                                else:
+                                    self.log("自动登录失败", "WARNING")
+                        else:
+                            # 还未达到阈值，只是记录日志
+                            logging.debug("网络探测失败，但尚未达到阈值 (%d/%d)，继续观察...",
+                                         fail_count, FAIL_THRESHOLD)
+
+                    time.sleep(30)  # 每 30 秒检测一次（降低频率，减少资源消耗）
                 except Exception as e:
                     self.log(f"监控出错: {str(e)}", "ERROR")
-                    time.sleep(5)
+                    time.sleep(30)
                     
         self.monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
         self.monitor_thread.start()

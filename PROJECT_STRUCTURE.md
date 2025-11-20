@@ -11,7 +11,7 @@
 │   └── pull_request_template.md    # PR 模板
 │
 ├── dist/                             # 打包输出目录（.gitignore）
-│   ├── 校园网登录工具_v2.6.exe     # 打包后的可执行文件
+│   ├── 校园网登录工具_v2.7.exe     # 打包后的可执行文件
 │   └── 使用说明.txt                 # 用户使用说明
 │
 ├── .editorconfig                     # 编辑器配置
@@ -174,14 +174,14 @@ pyinstaller build_config_optimized.spec --clean
 
 ### 输出位置
 
-- **可执行文件**: `dist/校园网登录工具_v2.6.exe`
+- **可执行文件**: `dist/校园网登录工具_v2.7.exe`
 - **大小**: 约 22 MB
 - **包含**: 所有依赖和资源
 
 ### 分发内容
 
 发布时应包含：
-1. `校园网登录工具_v2.6.exe` - 主程序
+1. `校园网登录工具_v2.7.exe` - 主程序
 2. `使用说明.txt` - 用户手册
 3. `login_config.json.example` - 配置示例（可选）
 

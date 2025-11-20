@@ -27,10 +27,10 @@ from typing import Dict, List
 import requests
 from bs4 import BeautifulSoup
 
-# Default probe URLs that commonly trigger captive portals
+# 用于探测认证门户的URL列表（用于 find_captive_portal）
 DEFAULT_PROBE_URLS = [
-    "http://www.gstatic.com/generate_204",  # returns 204 when online
-    "http://connectivitycheck.gstatic.com/generate_204",
+    "http://www.xinhuanet.com/",
+    "http://www.163.com/",
     "http://www.baidu.com/",
 ]
 
@@ -68,20 +68,58 @@ def setup_logger(verbosity: int):
     )
 
 
-def internet_ok(session: requests.Session, timeout: float = 5.0) -> bool:
-    try:
-        resp = session.get("http://www.gstatic.com/generate_204", timeout=timeout, allow_redirects=False, headers=HEADERS)
-        logging.debug("Probe generate_204 status=%s, headers=%s", resp.status_code, dict(resp.headers))
-        if resp.status_code == 204:
-            return True
-        if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
-            return False
-        resp2 = session.get("https://www.baidu.com", timeout=timeout, allow_redirects=False, headers=HEADERS)
-        logging.debug("Probe baidu status=%s, redirected=%s", resp2.status_code, resp2.is_redirect)
-        return not (resp2.is_redirect or resp2.status_code in (301, 302, 303, 307, 308))
-    except requests.RequestException as e:
-        logging.info("Internet probe error: %s", e)
-        return False
+def internet_ok(session: requests.Session, timeout: float = 10.0) -> bool:
+    """
+    检测网络是否可达（改进版：多URL轮询，降低误判）
+
+    探测策略:
+    1. 尝试 multiple endpoints (www.xinhuanet.com, www.163.com, www.baidu.com)
+    2. 任意一个成功返回 200 即认为在线
+    3. 超时 10 秒，给弱网环境留足够时间
+    4. 优化探测地址，提升稳定性
+
+    Args:
+        session: requests Session 对象
+        timeout: 单次请求超时时间（秒），默认 10 秒
+
+    Returns:
+        bool: True 如果网络可达，False 如果判定为离线
+    """
+    # 探测地址列表（按优先级排序）
+    probe_endpoints = [
+        ("http://www.xinhuanet.com", 200),  # 新华网
+        ("http://www.163.com", 200),  # 网易
+        ("http://www.baidu.com", 200),  # 百度
+    ]
+
+    for url, expected_status in probe_endpoints:
+        try:
+            start_time = time.time()
+            resp = session.get(url, timeout=timeout, allow_redirects=False, headers=HEADERS)
+            elapsed = (time.time() - start_time) * 1000
+
+            logging.debug("[Probe] %s -> %d in %.0f ms", url, resp.status_code, elapsed)
+
+            # 如果返回期望的状态码，说明网络正常
+            if resp.status_code == expected_status:
+                return True
+
+            # 如果遇到重定向，说明可能遇到认证门户
+            if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get("Location") or resp.headers.get("location")
+                logging.debug("[Probe] Redirect detected to: %s", location)
+                return False
+
+        except requests.Timeout:
+            logging.debug("[Probe] %s timeout after %d s", url, timeout)
+            continue
+        except requests.RequestException as e:
+            logging.debug("[Probe] %s error: %s", url, e)
+            continue
+
+    # 所有探测都失败，认为网络不可达
+    logging.debug("[Probe] All endpoints failed, network considered unreachable")
+    return False
 
 
 def find_captive_portal(session: requests.Session, probe_urls=None, timeout: float = 6.0):
@@ -402,14 +440,35 @@ def main():
 
     if args.watch:
         logging.info("进入监控模式：每 %.1f 秒检测一次网络可达性", args.watch_interval)
+        fail_count = 0  # 连续失败计数器
+        FAIL_THRESHOLD = 3  # 达到此阈值才认为真正断网
+
         while True:
             try:
                 if internet_ok(session):
+                    if fail_count > 0:
+                        logging.debug("[Network] Recovered from %d consecutive failures", fail_count)
+                    fail_count = 0  # 网络正常，重置计数器
                     logging.debug("网络正常，无需登录。")
                     time.sleep(args.watch_interval)
                     continue
 
-                logging.info("检测到网络不可达，准备触发登录。")
+                # 探测失败，增加计数
+                fail_count += 1
+                logging.debug("[Network] Detection failed %d/%d times", fail_count, FAIL_THRESHOLD)
+
+                if fail_count < FAIL_THRESHOLD:
+                    # 还没达到阈值，继续观察
+                    logging.debug("网络探测失败，但尚未达到阈值 (%d/%d)，继续观察...",
+                                 fail_count, FAIL_THRESHOLD)
+                    time.sleep(args.watch_interval)
+                    continue
+
+                # 达到失败阈值，真正认为网络断开
+                logging.warning("[Network] %d consecutive failures detected, network considered down",
+                               fail_count)
+                logging.info("检测到网络断开，触发自动登录...")
+
                 portal_url = args.portal or find_captive_portal(session, probe_urls=args.probe or DEFAULT_PROBE_URLS)
                 if not portal_url:
                     logging.warning("未捕获到认证重定向，稍后重试。")
